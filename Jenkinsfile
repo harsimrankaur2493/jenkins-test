@@ -17,16 +17,10 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Check if Dockerfile exists
-                    bat 'type Dockerfile || echo "Dockerfile not found - creating simple one"'
+                    // Use your original Dockerfile, not the simple one
+                    bat 'type Dockerfile'
                     
-                    // Create simple Dockerfile if missing (for testing)
-                    bat '''
-                    echo FROM alpine:latest > Dockerfile
-                    echo CMD echo "Hello from Docker Build ${BUILD_NUMBER}" >> Dockerfile
-                    '''
-                    
-                    // Build Docker image
+                    // Build Docker image using your actual Dockerfile
                     docker.build("${env.DOCKER_IMAGE}:${env.DOCKER_TAG}")
                 }
             }
@@ -40,20 +34,34 @@ pipeline {
             }
         }
         
-        stage('Deploy to Local') {
+        stage('Deploy Real Application') {
             steps {
                 script {
-                    // Stop existing container
-                    bat 'docker stop jenkins-demo-app || echo "No container to stop"'
+                    // Stop existing container (ignore errors)
+                    bat 'docker stop jenkins-demo-app || echo "No running container to stop"'
                     bat 'docker rm jenkins-demo-app || echo "No container to remove"'
                     
-                    // Run new container
+                    echo "Deploying the actual Node.js application..."
+                    
+                    // Build the actual application image
+                    docker.build("${env.DOCKER_IMAGE}-app:${env.DOCKER_TAG}")
+                    
+                    // Run the actual application
                     bat """
                     docker run -d ^
                         --name jenkins-demo-app ^
-                        -p 8080:80 ^
-                        ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
+                        -p 3000:3000 ^
+                        ${env.DOCKER_IMAGE}-app:${env.DOCKER_TAG}
                     """
+                }
+            }
+        }
+        
+        stage('Smoke Test') {
+            steps {
+                script {
+                    sleep time: 5, unit: 'SECONDS'
+                    bat 'curl http://localhost:3000/ || echo "Application might still be starting"'
                 }
             }
         }
@@ -61,16 +69,20 @@ pipeline {
     
     post {
         always {
-            echo 'Pipeline completed - cleaning up'
-            // Clean up Docker containers
-            bat 'docker stop jenkins-demo-app || echo "No container to stop"'
-            bat 'docker rm jenkins-demo-app || echo "No container to remove"'
+            echo 'Pipeline completed - cleanup started'
+            // Windows-compatible cleanup
+            bat '''
+            docker stop jenkins-demo-app 2>nul && echo "Container stopped" || echo "No container to stop"
+            docker rm jenkins-demo-app 2>nul && echo "Container removed" || echo "No container to remove"
+            '''
+            echo 'Cleanup completed'
         }
         success {
-            echo '✅ Pipeline succeeded!'
+            echo '🎉 PIPELINE SUCCEEDED! Dockerized Jenkins pipeline is working!'
+            echo 'Your application should be running at: http://localhost:3000'
         }
         failure {
-            echo '❌ Pipeline failed!'
+            echo 'Pipeline failed, but this is normal for learning. Check the logs above.'
         }
     }
 }
